@@ -1,0 +1,35 @@
+{
+  "name": "pi-cirthan-provider",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Pi provider package for the Cirthan API (OpenAI-compatible).",
+  "license": "MIT",
+  "files": [
+    "extensions/",
+    "README.md",
+    "LICENSE"
+  ],
+  "pi": {
+    "extensions": [
+      "./extensions/index.ts"
+    ]
+  },
+  "peerDependencies": {
+    "@mariozechner/pi-coding-agent": "*"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "dev": "tsc -p tsconfig.json -w",
+    "lint": "eslint .",
+    "test": "node --test dist/test/*.test.js"
+  },
+  "dependencies": {
+    "openai": "^4.80.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.7",
+    "eslint": "^9.17.0",
+    "typescript": "^5.7.3"
+  }
+}
