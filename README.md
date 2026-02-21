@@ -2,7 +2,7 @@
 
 Cirthan model provider for [pi](https://github.com/mariozechner/pi). Registers the `cirthan` provider using Cirthan's OpenAI-compatible API.
 
-This package dynamically fetches models from Cirthan's `/v1/models` endpoint at session start and provides an interactive model browser command.
+This package fetches models from Cirthan's `/v1/models` endpoint at session start to filter enabled models.
 
 ## Setup
 
@@ -31,10 +31,9 @@ Add to `~/.pi/agent/auth.json`:
 
 ## Usage
 
-- List models in pi: `pi /model`
+- List/switch models: `pi /model`
 - Use default model: `pi --model cirthan`
 - Use a specific model: `pi --model cirthan:glm-4.7-flash`
-- Browse/switch models interactively: `pi /cirthan-models`
 
 ## Default model
 

@@ -6,16 +6,13 @@
  * - Registers a provider using Cirthan's OpenAI-compatible API
  * - Fetches /v1/models on session start to filter which models are enabled
  * - Provides hardcoded model configs with metadata
- * - Provides /cirthan-models command to browse and switch models (interactive UI)
  */
 
 import {
-	DynamicBorder,
 	type ExtensionAPI,
 	type ExtensionContext,
 	type ProviderModelConfig,
 } from "@mariozechner/pi-coding-agent";
-import { Box, Container, type SelectItem, SelectList, type SelectListTheme, Spacer, Text } from "@mariozechner/pi-tui";
 
 // =============================================================================
 // Types (OpenAI /models compatible)
@@ -88,8 +85,6 @@ const HARDCODED_MODELS: ProviderModelConfig[] = [
 		compat: CIRTHAN_COMPAT,
 	},
 ];
-
-const AUTH_JSON_PATH = "~/.pi/agent/auth.json";
 
 // =============================================================================
 // Auth helpers
@@ -164,35 +159,6 @@ async function fetchAndFilterModels(apiKey?: string): Promise<ProviderModelConfi
 }
 
 // =============================================================================
-// UI helpers (/cirthan-models)
-// =============================================================================
-
-const CATALOG_MODEL_COL = 38;
-const CATALOG_INPUT_COL = 9;
-const CATALOG_REASON_COL = 9;
-
-function truncateWithEllipsis(text: string, maxWidth: number): string {
-	if (maxWidth <= 0) return "";
-	if (text.length <= maxWidth) return text;
-	if (maxWidth === 1) return "…";
-	return `${text.slice(0, maxWidth - 1)}…`;
-}
-
-function formatCatalogHeader(): string {
-	const model = "Model".padEnd(CATALOG_MODEL_COL);
-	const input = "Input".padEnd(CATALOG_INPUT_COL);
-	const reason = "Reason".padEnd(CATALOG_REASON_COL);
-	return `${model} ${input} ${reason}`;
-}
-
-function formatCatalogRow(model: ProviderModelConfig): string {
-	const id = truncateWithEllipsis(model.id, CATALOG_MODEL_COL).padEnd(CATALOG_MODEL_COL);
-	const input = (model.input ?? ["text"]).join("+").padEnd(CATALOG_INPUT_COL);
-	const reason = (model.reasoning ? "yes" : "no").padEnd(CATALOG_REASON_COL);
-	return `${id} ${input} ${reason}`;
-}
-
-// =============================================================================
 // Extension entry point
 // =============================================================================
 
@@ -213,7 +179,7 @@ export default function (pi: ExtensionAPI) {
 			console.log("[Cirthan Provider] API key not configured.");
 			console.log("[Cirthan Provider] Options:");
 			console.log("  1. Set CIRTHAN_API_KEY environment variable");
-			console.log(`  2. Add to ${AUTH_JSON_PATH} (provider: "cirthan")`);
+			console.log("  2. Add to ~/.pi/agent/auth.json (provider: \"cirthan\")");
 		}
 
 		const models = await fetchAndFilterModels(apiKey);
@@ -225,155 +191,9 @@ export default function (pi: ExtensionAPI) {
 		});
 	});
 
-	pi.on("model_select", async (event, ctx) => {
+	pi.on("model_select", async (event, _ctx) => {
 		if (event.model.provider === "cirthan") {
-			const modelName = event.model.name || event.model.id;
-			ctx.ui.notify(`Using Cirthan model: ${modelName}`, "info");
+			console.log(`[Cirthan Provider] Using model: ${event.model.name || event.model.id}`);
 		}
-	});
-
-	pi.registerCommand("cirthan-models", {
-		description: "Display all available Cirthan models and switch the active model",
-		handler: async (_args, ctx) => {
-			if (!ctx.hasUI) {
-				console.log("[Cirthan Provider] /cirthan-models requires interactive mode");
-				return;
-			}
-			if (!ctx.isIdle()) {
-				ctx.ui.notify("Wait for the current response to finish before switching models", "warning");
-				return;
-			}
-
-			ctx.ui.notify("Fetching model list from Cirthan API...", "info");
-
-			try {
-				const apiKey = await getCirthanApiKey(ctx);
-				const models = await fetchAndFilterModels(apiKey);
-
-				if (models.length === 0) {
-					ctx.ui.notify("No models returned by Cirthan API", "warning");
-					return;
-				}
-
-				const items: SelectItem[] = models.map((m) => ({
-					value: m.id,
-					label: formatCatalogRow(m),
-				}));
-
-				let overlayRows = 44;
-				let overlayCols = 120;
-
-				await ctx.ui.custom<void>(
-					(tui, theme, _keybindings, done) => {
-						overlayRows = tui.terminal.rows;
-						overlayCols = tui.terminal.columns;
-
-						const selectTheme: SelectListTheme = {
-							selectedPrefix: (text) => theme.fg("accent", text),
-							selectedText: (text) => theme.fg("accent", text),
-							description: (text) => theme.fg("muted", text),
-							scrollInfo: (text) => theme.fg("dim", text),
-							noMatch: (text) => theme.fg("warning", text),
-						};
-
-						const listMaxVisible = Math.max(6, Math.min(14, overlayRows - 18));
-						const selectList = new SelectList(items, Math.min(items.length, listMaxVisible), selectTheme);
-						const detailsText = new Text("", 1, 0);
-
-						const updateDetails = (modelId: string | undefined) => {
-							if (!modelId) {
-								detailsText.setText(theme.fg("muted", "No model selected"));
-								return;
-							}
-
-							const m = models.find((x) => x.id === modelId);
-							if (!m) {
-								detailsText.setText(theme.fg("muted", "No model selected"));
-								return;
-							}
-
-							const lines = [
-								theme.fg("accent", theme.bold("Selected model")),
-								`${theme.fg("muted", "ID:")} ${m.id}`,
-								`${theme.fg("muted", "Input:")} ${(m.input ?? ["text"]).join("+")}`,
-								`${theme.fg("muted", "Reasoning:")} ${m.reasoning ? "yes" : "no"}`,
-								"",
-								`${theme.fg("muted", "Use with:")} cirthan:${m.id}`,
-							];
-							detailsText.setText(lines.join("\n"));
-						};
-
-						const initial = items[0];
-						updateDetails(initial?.value);
-
-						selectList.onSelectionChange = (item) => {
-							updateDetails(item.value);
-							tui.requestRender();
-						};
-
-						selectList.onSelect = (item) => {
-							void (async () => {
-								const registryModel = ctx.modelRegistry.find("cirthan", item.value);
-								if (!registryModel) {
-									ctx.ui.notify(`Model cirthan:${item.value} is not registered in pi`, "warning");
-									return;
-								}
-
-								const switched = await pi.setModel(registryModel);
-								if (!switched) {
-									ctx.ui.notify(`No API key available for cirthan:${item.value}`, "error");
-									return;
-								}
-
-								ctx.ui.notify(`Switched model to cirthan:${item.value}`, "info");
-								done(undefined);
-							})();
-						};
-
-						selectList.onCancel = () => done(undefined);
-
-						const container = new Container();
-						container.addChild(new DynamicBorder((s: string) => theme.fg("accent", s)));
-						container.addChild(new Text(theme.fg("accent", theme.bold("Cirthan Model Catalog")), 1, 0));
-						container.addChild(new Spacer(1));
-						container.addChild(new Text(theme.fg("dim", formatCatalogHeader()), 1, 0));
-						container.addChild(new DynamicBorder((s: string) => theme.fg("muted", s)));
-						container.addChild(selectList);
-						container.addChild(new DynamicBorder((s: string) => theme.fg("muted", s)));
-						container.addChild(new Spacer(1));
-						container.addChild(detailsText);
-						container.addChild(new Spacer(1));
-						container.addChild(new Text(theme.fg("dim", "↑↓ navigate · Enter switches · Esc closes"), 1, 0));
-						container.addChild(new DynamicBorder((s: string) => theme.fg("accent", s)));
-
-						const panel = new Box(0, 0, (s: string) => theme.bg("customMessageBg", s));
-						panel.addChild(container);
-
-						return {
-							render: (width) => panel.render(width),
-							invalidate: () => panel.invalidate(),
-							handleInput: (data) => {
-								selectList.handleInput(data);
-								tui.requestRender();
-							},
-						};
-					},
-					{
-						overlay: true,
-						overlayOptions: () => {
-							const width = overlayCols < 100 ? "98%" : "90%";
-							if (overlayRows < 34) {
-								return { width: "100%", maxHeight: "94%", anchor: "center" as const, margin: 0 };
-							}
-							return { width, maxHeight: "80%", anchor: "bottom-center" as const, offsetY: -4, margin: 1 };
-						},
-					},
-				);
-			} catch (error) {
-				const errorMessage = error instanceof Error ? error.message : String(error);
-				ctx.ui.notify(`Failed to fetch models: ${errorMessage}`, "error");
-				console.error("[Cirthan Provider] Model listing failed:", error);
-			}
-		},
 	});
 }
