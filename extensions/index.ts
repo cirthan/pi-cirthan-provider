@@ -23,6 +23,10 @@ type OpenAIModel = {
 	object?: string;
 	created?: number;
 	owned_by?: string;
+	root?: string;
+	parent?: string;
+	max_model_len?: number;
+	contextWindow?: number;
 };
 
 type OpenAIModelsResponse = {
@@ -53,7 +57,7 @@ const HARDCODED_MODELS: ProviderModelConfig[] = [
 		input: ["text"],
 		cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
 		contextWindow: 200000,
-		maxTokens: 128000,
+		maxTokens: 131072,
 	},
 	{
 		id: "qwen3-vl-8b-instruct",
@@ -70,8 +74,8 @@ const HARDCODED_MODELS: ProviderModelConfig[] = [
 		reasoning: true,
 		input: ["text"],
 		cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
-		contextWindow: 200000,
-		maxTokens: 128000,
+		contextWindow: 196608,
+		maxTokens: 131072,
 	},
 ];
 
@@ -126,15 +130,31 @@ async function fetchAndFilterModels(apiKey?: string): Promise<ProviderModelConfi
 		}
 
 		const data = (await response.json()) as OpenAIModelsResponse;
-		const enabledModelIds = new Set((data.data ?? []).map((m) => m.id));
 
-		console.log(`[Cirthan Provider] API returned ${enabledModelIds.size} enabled models`);
+		// Build map of model ID to context window from API
+		const apiModelContexts = new Map<string, number>();
+		for (const model of data.data ?? []) {
+			apiModelContexts.set(
+				model.id.toLowerCase(),
+				model.max_model_len ?? model.contextWindow ?? 0
+			);
+		}
+
+		console.log(`[Cirthan Provider] API returned ${apiModelContexts.size} enabled models`);
 
 		// Filter: only include models that are enabled in the API
 		// Always include default model regardless of API response
+		// Use case-insensitive comparison since API may return different casing
 		const filtered = HARDCODED_MODELS.filter((model) => {
 			if (model.id === CIRTHAN_DEFAULT_MODEL_ID) return true;
-			return enabledModelIds.has(model.id);
+			return apiModelContexts.has(model.id.toLowerCase());
+		}).map((model) => {
+			// Override contextWindow with API's max_model_len if available
+			const apiContext = apiModelContexts.get(model.id.toLowerCase());
+			if (apiContext && apiContext > 0) {
+				return { ...model, contextWindow: apiContext };
+			}
+			return model;
 		});
 
 		// Sort with default model first, then alphabetical
