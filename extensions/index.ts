@@ -139,7 +139,11 @@ async function fetchAndFilterModels(apiKey?: string): Promise<ProviderModelConfi
 		console.log(`[Cirthan Provider] API returned ${enabledModelIds.size} enabled models`);
 
 		// Filter: only include models that are enabled in the API
-		const filtered = HARDCODED_MODELS.filter((model) => enabledModelIds.has(model.id));
+		// Always include default model regardless of API response
+		const filtered = HARDCODED_MODELS.filter((model) => {
+			if (model.id === CIRTHAN_DEFAULT_MODEL_ID) return true;
+			return enabledModelIds.has(model.id);
+		});
 
 		// Sort with default model first, then alphabetical
 		filtered.sort((a, b) => {
@@ -191,9 +195,4 @@ export default function (pi: ExtensionAPI) {
 		});
 	});
 
-	pi.on("model_select", async (event, _ctx) => {
-		if (event.model.provider === "cirthan") {
-			console.log(`[Cirthan Provider] Using model: ${event.model.name || event.model.id}`);
-		}
-	});
 }
