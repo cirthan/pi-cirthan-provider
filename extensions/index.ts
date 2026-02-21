@@ -109,6 +109,9 @@ async function hasCirthanApiKey(ctx: ExtensionContext): Promise<boolean> {
  * Returns hardcoded configs filtered to only include enabled models.
  */
 async function fetchAndFilterModels(apiKey?: string): Promise<ProviderModelConfig[]> {
+	const controller = new AbortController();
+	const timeout = setTimeout(() => controller.abort(), 5000);
+
 	try {
 		const headers: Record<string, string> = {
 			Accept: "application/json",
@@ -116,7 +119,7 @@ async function fetchAndFilterModels(apiKey?: string): Promise<ProviderModelConfi
 		if (apiKey) headers.Authorization = `Bearer ${apiKey}`;
 
 		console.log(`[Cirthan Provider] Fetching enabled models from: ${CIRTHAN_MODELS_ENDPOINT}`);
-		const response = await fetch(CIRTHAN_MODELS_ENDPOINT, { headers });
+		const response = await fetch(CIRTHAN_MODELS_ENDPOINT, { headers, signal: controller.signal });
 		if (!response.ok) {
 			const errorText = await response.text();
 			throw new Error(`Failed to fetch models: ${response.status} ${response.statusText} - ${errorText}`);
@@ -144,10 +147,17 @@ async function fetchAndFilterModels(apiKey?: string): Promise<ProviderModelConfi
 		console.log(`[Cirthan Provider] Registered ${filtered.length} model configs for provider 'cirthan'`);
 		return filtered;
 	} catch (error) {
-		console.error("[Cirthan Provider] Failed to fetch models:", error);
+		const message = error instanceof Error ? error.message : String(error);
+		if (message === "AbortError" || message.includes("aborted")) {
+			console.warn("[Cirthan Provider] Model fetch timed out after 5s");
+		} else {
+			console.error("[Cirthan Provider] Failed to fetch models:", error);
+		}
 		// On error, return all hardcoded models as fallback
 		console.log("[Cirthan Provider] Using all hardcoded models as fallback");
 		return [...HARDCODED_MODELS];
+	} finally {
+		clearTimeout(timeout);
 	}
 }
 
