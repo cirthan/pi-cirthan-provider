@@ -4,7 +4,8 @@
  * Cirthan provider for pi.
  *
  * - Registers a provider using Cirthan's OpenAI-compatible API
- * - Fetches /v1/models dynamically on session start and refreshes the provider's model list
+ * - Fetches /v1/models on session start to filter which models are enabled
+ * - Provides hardcoded model configs with metadata
  * - Provides /cirthan-models command to browse and switch models (interactive UI)
  */
 
@@ -32,40 +33,12 @@ type OpenAIModelsResponse = {
 	data: OpenAIModel[];
 };
 
-type CirthanModelInfoItem = {
-	model_name: string;
-	model_info?: {
-		description?: string;
-		// pricing
-		input_cost_per_token?: number;
-		output_cost_per_token?: number;
-		cache_read_input_token_cost?: number;
-		cache_creation_input_token_cost?: number;
-		// limits
-		max_input_tokens?: number;
-		max_output_tokens?: number;
-		max_tokens?: number;
-		// capabilities
-		supports_vision?: boolean;
-		supports_reasoning?: boolean;
-		supports_function_calling?: boolean;
-		supports_tool_choice?: boolean;
-	};
-};
-
-type CirthanModelInfoResponse = {
-	data: CirthanModelInfoItem[];
-};
-
 // =============================================================================
 // Configuration
 // =============================================================================
 
 const CIRTHAN_API_BASE_URL = (process.env.CIRTHAN_BASE_URL ?? "https://api.cirthan.com/v1").replace(/\/+$/, "");
 const CIRTHAN_MODELS_ENDPOINT = `${CIRTHAN_API_BASE_URL}/models`;
-// Optional richer metadata endpoint (not OpenAI standard). If present, we use it to
-// fill in pricing, context/max tokens and capabilities.
-const CIRTHAN_MODEL_INFO_ENDPOINT = `${(process.env.CIRTHAN_BASE_URL ?? "https://api.cirthan.com").replace(/\/+$/, "")}/model/info`;
 
 /** Default model for this provider. */
 const CIRTHAN_DEFAULT_MODEL_ID = "glm-4.7-flash";
@@ -77,6 +50,44 @@ const CIRTHAN_COMPAT = {
 	supportsStore: false,
 	requiresToolResultName: true,
 } as const;
+
+// =============================================================================
+// Hardcoded model configs
+// =============================================================================
+
+/** Hardcoded model configurations - exactly matching /v1/models response. */
+const HARDCODED_MODELS: ProviderModelConfig[] = [
+	{
+		id: "glm-4.7-flash",
+		name: "glm-4.7-flash",
+		reasoning: true,
+		input: ["text"],
+		cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+		contextWindow: 200000,
+		maxTokens: 128000,
+		compat: CIRTHAN_COMPAT,
+	},
+	{
+		id: "qwen3-vl-8b-instruct",
+		name: "qwen3-vl-8b-instruct",
+		reasoning: false,
+		input: ["text", "image"],
+		cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+		contextWindow: 131072,
+		maxTokens: 32768,
+		compat: CIRTHAN_COMPAT,
+	},
+	{
+		id: "minimax-m2.5",
+		name: "minimax-m2.5",
+		reasoning: true,
+		input: ["text"],
+		cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+		contextWindow: 200000,
+		maxTokens: 128000,
+		compat: CIRTHAN_COMPAT,
+	},
+];
 
 const AUTH_JSON_PATH = "~/.pi/agent/auth.json";
 
@@ -106,38 +117,21 @@ async function hasCirthanApiKey(ctx: ExtensionContext): Promise<boolean> {
 }
 
 // =============================================================================
-// Model fetching + transformation
+// Model fetching + filtering
 // =============================================================================
 
-function guessInputModalities(modelId: string): ("text" | "image")[] {
-	// Heuristic: treat common "vl" / vision-language models as image capable.
-	const id = modelId.toLowerCase();
-	if (id.includes("-vl-") || id.includes("vl-") || id.includes("vision") || id.includes("multimodal")) {
-		return ["text", "image"];
-	}
-	return ["text"];
-}
-
-function guessReasoning(modelId: string): boolean {
-	// Heuristic only. Cirthan /v1/models payload doesn't include capabilities.
-	const id = modelId.toLowerCase();
-	return id.includes("reason") || id.includes("r1") || id.includes("thinking") || id.includes("deep");
-}
-
-function perTokenToPerMillion(cost?: number): number {
-	if (!cost || cost <= 0) return 0;
-	return cost * 1_000_000;
-}
-
-async function fetchCirthanModels(apiKey?: string): Promise<ProviderModelConfig[]> {
+/**
+ * Verify models are enabled by fetching /v1/models.
+ * Returns hardcoded configs filtered to only include enabled models.
+ */
+async function fetchAndFilterModels(apiKey?: string): Promise<ProviderModelConfig[]> {
 	try {
 		const headers: Record<string, string> = {
 			Accept: "application/json",
 		};
 		if (apiKey) headers.Authorization = `Bearer ${apiKey}`;
 
-		console.log(`[Cirthan Provider] Fetching model ids from: ${CIRTHAN_MODELS_ENDPOINT}`);
-		// Always fetch the OpenAI-compatible /v1/models list (source of truth for ids)
+		console.log(`[Cirthan Provider] Fetching enabled models from: ${CIRTHAN_MODELS_ENDPOINT}`);
 		const response = await fetch(CIRTHAN_MODELS_ENDPOINT, { headers });
 		if (!response.ok) {
 			const errorText = await response.text();
@@ -145,119 +139,28 @@ async function fetchCirthanModels(apiKey?: string): Promise<ProviderModelConfig[
 		}
 
 		const data = (await response.json()) as OpenAIModelsResponse;
-		const models = (data.data ?? []).filter((m) => typeof m.id === "string" && m.id.length > 0);
+		const enabledModelIds = new Set((data.data ?? []).map((m) => m.id));
 
-		// Optionally enrich with /model/info (non-standard). This endpoint may not exist
-		// on all deployments, so failures must not break the provider.
-		let infoByName: Map<string, CirthanModelInfoItem> | undefined;
-		try {
-			console.log(`[Cirthan Provider] Attempting optional model enrichment from: ${CIRTHAN_MODEL_INFO_ENDPOINT}`);
-			const infoResp = await fetch(CIRTHAN_MODEL_INFO_ENDPOINT, { headers });
-			if (!infoResp.ok) {
-				console.log(
-					`[Cirthan Provider] Optional /model/info enrichment skipped (${infoResp.status} ${infoResp.statusText})`,
-				);
-			} else {
-				const infoData = (await infoResp.json()) as CirthanModelInfoResponse;
-				const count = infoData.data?.length ?? 0;
-				infoByName = new Map((infoData.data ?? []).map((it) => [it.model_name, it] as const));
-				console.log(`[Cirthan Provider] Enriched metadata loaded for ${count} models from /model/info`);
-			}
-		} catch (e) {
-			const msg = e instanceof Error ? e.message : String(e);
-			console.log(`[Cirthan Provider] Optional /model/info enrichment failed: ${msg}`);
-		}
+		console.log(`[Cirthan Provider] API returned ${enabledModelIds.size} enabled models`);
+
+		// Filter: only include models that are enabled in the API
+		const filtered = HARDCODED_MODELS.filter((model) => enabledModelIds.has(model.id));
 
 		// Sort with default model first, then alphabetical
-		models.sort((a, b) => {
+		filtered.sort((a, b) => {
 			if (a.id === CIRTHAN_DEFAULT_MODEL_ID) return -1;
 			if (b.id === CIRTHAN_DEFAULT_MODEL_ID) return 1;
 			return a.id.localeCompare(b.id);
 		});
 
-		// If the default model isn't present, prepend it so `--model cirthan` is stable.
-		if (!models.some((m) => m.id === CIRTHAN_DEFAULT_MODEL_ID)) {
-			console.log(
-				`[Cirthan Provider] Default model '${CIRTHAN_DEFAULT_MODEL_ID}' not returned by /v1/models; prepending it`,
-			);
-			models.unshift({ id: CIRTHAN_DEFAULT_MODEL_ID });
-		}
-
-		const configs = models.map((m) => {
-			const info = infoByName?.get(m.id);
-			const modelInfo = info?.model_info;
-
-			const supportsVision = modelInfo?.supports_vision;
-			const supportsReasoning = modelInfo?.supports_reasoning;
-
-			const cfg: ProviderModelConfig = {
-				id: m.id,
-				name: modelInfo?.description || m.id,
-				reasoning: supportsReasoning ?? guessReasoning(m.id),
-				input: supportsVision ? (["text", "image"] as const) : guessInputModalities(m.id),
-				cost: {
-					input: perTokenToPerMillion(modelInfo?.input_cost_per_token),
-					output: perTokenToPerMillion(modelInfo?.output_cost_per_token),
-					cacheRead: perTokenToPerMillion(modelInfo?.cache_read_input_token_cost),
-					cacheWrite: perTokenToPerMillion(modelInfo?.cache_creation_input_token_cost),
-				},
-				contextWindow: modelInfo?.max_input_tokens || 128000,
-				maxTokens: modelInfo?.max_output_tokens || modelInfo?.max_tokens || 32768,
-				compat: CIRTHAN_COMPAT,
-			};
-
-			if (cfg.id === CIRTHAN_DEFAULT_MODEL_ID) {
-				console.log(
-					`[Cirthan Provider] Default model resolved: id=${cfg.id} contextWindow=${cfg.contextWindow} maxTokens=${cfg.maxTokens} reasoning=${cfg.reasoning} input=${cfg.input.join(",")}`,
-				);
-			}
-
-			return cfg;
-		});
-
-		console.log(`[Cirthan Provider] Registered ${configs.length} model configs for provider 'cirthan'`);
-		return configs;
+		console.log(`[Cirthan Provider] Registered ${filtered.length} model configs for provider 'cirthan'`);
+		return filtered;
 	} catch (error) {
 		console.error("[Cirthan Provider] Failed to fetch models:", error);
-		return getFallbackModels();
+		// On error, return all hardcoded models as fallback
+		console.log("[Cirthan Provider] Using all hardcoded models as fallback");
+		return [...HARDCODED_MODELS];
 	}
-}
-
-function getFallbackModels(): ProviderModelConfig[] {
-	// Minimal fallback list based on current observed /v1/models response.
-	// These values should match what's returned by /v1/models and /model/info.
-	return [
-		{
-			id: CIRTHAN_DEFAULT_MODEL_ID,
-			name: CIRTHAN_DEFAULT_MODEL_ID,
-			reasoning: true,
-			input: ["text"],
-			cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
-			contextWindow: 200000,
-			maxTokens: 32768,
-			compat: CIRTHAN_COMPAT,
-		},
-		{
-			id: "qwen3-vl-8b-instruct",
-			name: "qwen3-vl-8b-instruct",
-			reasoning: false,
-			input: ["text", "image"],
-			cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
-			contextWindow: 131072,
-			maxTokens: 32768,
-			compat: CIRTHAN_COMPAT,
-		},
-		{
-			id: "minimax-m2.5",
-			name: "minimax-m2.5",
-			reasoning: true,
-			input: ["text"],
-			cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
-			contextWindow: 200000,
-			maxTokens: 32768,
-			compat: CIRTHAN_COMPAT,
-		},
-	];
 }
 
 // =============================================================================
@@ -299,7 +202,7 @@ export default function (pi: ExtensionAPI) {
 		baseUrl: CIRTHAN_API_BASE_URL,
 		apiKey: "CIRTHAN_API_KEY",
 		api: "openai-completions",
-		models: getFallbackModels(),
+		models: HARDCODED_MODELS,
 	});
 
 	pi.on("session_start", async (_event, ctx) => {
@@ -310,20 +213,16 @@ export default function (pi: ExtensionAPI) {
 			console.log("[Cirthan Provider] API key not configured.");
 			console.log("[Cirthan Provider] Options:");
 			console.log("  1. Set CIRTHAN_API_KEY environment variable");
-			console.log(`  2. Add to ${AUTH_JSON_PATH} (provider: \"cirthan\")`);
+			console.log(`  2. Add to ${AUTH_JSON_PATH} (provider: "cirthan")`);
 		}
 
-		const models = await fetchCirthanModels(apiKey);
-		if (models.length > 0) {
-			ctx.modelRegistry.registerProvider("cirthan", {
-				baseUrl: CIRTHAN_API_BASE_URL,
-				apiKey: "CIRTHAN_API_KEY",
-				api: "openai-completions",
-				models,
-			});
-		} else {
-			console.log("[Cirthan Provider] API unavailable, using fallback models");
-		}
+		const models = await fetchAndFilterModels(apiKey);
+		ctx.modelRegistry.registerProvider("cirthan", {
+			baseUrl: CIRTHAN_API_BASE_URL,
+			apiKey: "CIRTHAN_API_KEY",
+			api: "openai-completions",
+			models,
+		});
 	});
 
 	pi.on("model_select", async (event, ctx) => {
@@ -349,7 +248,7 @@ export default function (pi: ExtensionAPI) {
 
 			try {
 				const apiKey = await getCirthanApiKey(ctx);
-				const models = await fetchCirthanModels(apiKey);
+				const models = await fetchAndFilterModels(apiKey);
 
 				if (models.length === 0) {
 					ctx.ui.notify("No models returned by Cirthan API", "warning");
