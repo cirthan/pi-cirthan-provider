@@ -40,14 +40,6 @@ const CIRTHAN_MODELS_ENDPOINT = `${CIRTHAN_API_BASE_URL}/models`;
 /** Default model for this provider. */
 const CIRTHAN_DEFAULT_MODEL_ID = "glm-4.7-flash";
 
-/** Shared compat flags for all Cirthan models (OpenAI-compatible API). */
-const CIRTHAN_COMPAT = {
-	supportsDeveloperRole: false,
-	supportsUsageInStreaming: false,
-	supportsStore: false,
-	requiresToolResultName: true,
-} as const;
-
 // =============================================================================
 // Hardcoded model configs
 // =============================================================================
@@ -62,7 +54,6 @@ const HARDCODED_MODELS: ProviderModelConfig[] = [
 		cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
 		contextWindow: 200000,
 		maxTokens: 128000,
-		compat: CIRTHAN_COMPAT,
 	},
 	{
 		id: "qwen3-vl-8b-instruct",
@@ -72,7 +63,6 @@ const HARDCODED_MODELS: ProviderModelConfig[] = [
 		cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
 		contextWindow: 131072,
 		maxTokens: 32768,
-		compat: CIRTHAN_COMPAT,
 	},
 	{
 		id: "minimax-m2.5",
@@ -82,7 +72,6 @@ const HARDCODED_MODELS: ProviderModelConfig[] = [
 		cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
 		contextWindow: 200000,
 		maxTokens: 128000,
-		compat: CIRTHAN_COMPAT,
 	},
 ];
 
