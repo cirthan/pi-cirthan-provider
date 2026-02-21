@@ -225,6 +225,7 @@ async function fetchCirthanModels(apiKey?: string): Promise<ProviderModelConfig[
 
 function getFallbackModels(): ProviderModelConfig[] {
 	// Minimal fallback list based on current observed /v1/models response.
+	// These values should match what's returned by /v1/models and /model/info.
 	return [
 		{
 			id: CIRTHAN_DEFAULT_MODEL_ID,
@@ -232,7 +233,7 @@ function getFallbackModels(): ProviderModelConfig[] {
 			reasoning: true,
 			input: ["text"],
 			cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
-			contextWindow: 128000,
+			contextWindow: 200000,
 			maxTokens: 32768,
 			compat: CIRTHAN_COMPAT,
 		},
@@ -242,7 +243,7 @@ function getFallbackModels(): ProviderModelConfig[] {
 			reasoning: false,
 			input: ["text", "image"],
 			cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
-			contextWindow: 128000,
+			contextWindow: 131072,
 			maxTokens: 32768,
 			compat: CIRTHAN_COMPAT,
 		},
@@ -252,7 +253,7 @@ function getFallbackModels(): ProviderModelConfig[] {
 			reasoning: true,
 			input: ["text"],
 			cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
-			contextWindow: 128000,
+			contextWindow: 200000,
 			maxTokens: 32768,
 			compat: CIRTHAN_COMPAT,
 		},
