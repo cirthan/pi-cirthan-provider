@@ -4,7 +4,7 @@
  * Cirthan provider for pi.
  *
  * - Registers a provider using Cirthan's OpenAI-compatible API
- * - Fetches /v1/models on session start to filter which models are enabled
+ * - Fetches /info on session start to filter which models are enabled
  * - Provides hardcoded model configs with metadata
  */
 
@@ -37,7 +37,7 @@ type CirthanInfoResponse = {
 // =============================================================================
 
 const CIRTHAN_API_BASE_URL = (process.env.CIRTHAN_BASE_URL ?? "https://api.cirthan.com/v1").replace(/\/+$/, "");
-const CIRTHAN_INFO_ENDPOINT = `${CIRTHAN_API_BASE_URL}/info`;
+const CIRTHAN_INFO_ENDPOINT = "https://api.cirthan.com/info";
 
 /** Default model for this provider. */
 const CIRTHAN_DEFAULT_MODEL_ID = "glm-4.7-flash";
