@@ -1,6 +1,6 @@
 {
   "name": "@cirthan/pi-cirthan-provider",
-  "version": "0.1.3",
+  "version": "0.2.0",
   "description": "Pi provider package for the Cirthan API.",
   "type": "module",
   "main": "dist/index.js",
