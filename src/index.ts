@@ -145,6 +145,7 @@ async function fetchAndFilterModels(apiKey?: string): Promise<ProviderModelConfi
 		const registered = models.map((apiModel) => {
 			// Determine input types based on mode and capabilities
 			// Note: ProviderModelConfig.input only supports "text" | "image"
+			// audio support is tracked in the API but not exposed in the provider config
 			const inputTypes: ("text" | "image")[] = ["text"];
 			if (apiModel.supports_vision) inputTypes.push("image");
 
@@ -162,7 +163,7 @@ async function fetchAndFilterModels(apiKey?: string): Promise<ProviderModelConfi
 				id: apiModel.id,
 				name: apiModel.id,
 				reasoning: apiModel.supports_reasoning,
-				input: inputTypes as any,
+				input: inputTypes,
 				cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
 				contextWindow,
 				maxTokens,
