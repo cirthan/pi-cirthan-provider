@@ -13,7 +13,7 @@ npm version patch  # or minor, or major
 2. Push with tags:
 
 ```bash
-git push origin main --tags
+git push origin master --tags
 ```
 
 The workflow automatically:
