@@ -15,23 +15,21 @@ import {
 } from "@mariozechner/pi-coding-agent";
 
 // =============================================================================
-// Types (OpenAI /models compatible)
+// Types (Cirthan /info compatible)
 // =============================================================================
 
-type OpenAIModel = {
+type CirthanModelInfo = {
 	id: string;
-	object?: string;
-	created?: number;
-	owned_by?: string;
-	root?: string;
-	parent?: string;
-	max_model_len?: number;
-	contextWindow?: number;
+	max_input_tokens: number | null;
+	max_output_tokens: number | null;
+	mode: "chat" | "completion" | "embedding" | "audio";
+	supports_vision: boolean;
+	supports_audio_input: boolean;
+	supports_reasoning: boolean;
 };
 
-type OpenAIModelsResponse = {
-	object?: string;
-	data: OpenAIModel[];
+type CirthanInfoResponse = {
+	data: CirthanModelInfo[];
 };
 
 // =============================================================================
@@ -39,7 +37,7 @@ type OpenAIModelsResponse = {
 // =============================================================================
 
 const CIRTHAN_API_BASE_URL = (process.env.CIRTHAN_BASE_URL ?? "https://api.cirthan.com/v1").replace(/\/+$/, "");
-const CIRTHAN_MODELS_ENDPOINT = `${CIRTHAN_API_BASE_URL}/models`;
+const CIRTHAN_INFO_ENDPOINT = `${CIRTHAN_API_BASE_URL}/info`;
 
 /** Default model for this provider. */
 const CIRTHAN_DEFAULT_MODEL_ID = "glm-4.7-flash";
@@ -109,16 +107,17 @@ async function hasCirthanApiKey(ctx: ExtensionContext): Promise<boolean> {
 // =============================================================================
 
 /**
- * Verify models are enabled by fetching /v1/models.
+ * Fetch and filter models from authoritative /info endpoint.
  *
- * API is the source of truth for WHAT models exist.
- * HARDCODED_MODELS provide enriched metadata (reasoning, cost, input types, etc.)
- * that the API may not return.
+ * The /info endpoint is the source of truth for WHAT models exist.
+ * HARDCODED_MODELS provide enriched metadata (contextWindow, maxTokens, cost, etc.)
+ * that the /info endpoint may not return.
  *
- * For each model in the API response:
- * - Merge with hardcoded entry to get full metadata
- * - Use API's max_model_len/contextWindow for limits
- * - Lean on hardcoded for other fields
+ * For each model in the /info response:
+ * - Use supports_vision, supports_audio_input, supports_reasoning directly from API
+ * - Use mode to determine input types
+ * - Merge with hardcoded entry for contextWindow, maxTokens, cost
+ * - Fall back to API values if no hardcoded entry exists
  */
 async function fetchAndFilterModels(apiKey?: string): Promise<ProviderModelConfig[]> {
 	const controller = new AbortController();
@@ -130,55 +129,44 @@ async function fetchAndFilterModels(apiKey?: string): Promise<ProviderModelConfi
 		};
 		if (apiKey) headers.Authorization = `Bearer ${apiKey}`;
 
-		console.log(`[Cirthan Provider] Fetching enabled models from: ${CIRTHAN_MODELS_ENDPOINT}`);
-		const response = await fetch(CIRTHAN_MODELS_ENDPOINT, { headers, signal: controller.signal });
+		console.log(`[Cirthan Provider] Fetching enabled models from: ${CIRTHAN_INFO_ENDPOINT}`);
+		const response = await fetch(CIRTHAN_INFO_ENDPOINT, { headers, signal: controller.signal });
 		if (!response.ok) {
 			const errorText = await response.text();
 			throw new Error(`Failed to fetch models: ${response.status} ${response.statusText} - ${errorText}`);
 		}
 
-		const data = (await response.json()) as OpenAIModelsResponse;
-
-		// Build map of model ID from API responses (API is source of truth)
-		const apiModelContexts = new Map<string, number>();
-		for (const model of data.data ?? []) {
-			apiModelContexts.set(
-				model.id.toLowerCase(),
-				model.max_model_len ?? model.contextWindow ?? 0
-			);
-		}
-
-		console.log(`[Cirthan Provider] API returned ${apiModelContexts.size} enabled models`);
-
-		// Merge API models with hardcoded metadata
-		// For each API model, try to find matching config in HARDCODED_MODELS
+		const data = (await response.json()) as CirthanInfoResponse;
 		const models = data.data ?? [];
 
-		// Try to match each API model by ID (case-insensitive)
+		console.log(`[Cirthan Provider] API returned ${models.length} enabled models`);
+
+		// Map each API model to ProviderModelConfig
 		const registered = models.map((apiModel) => {
-			const apiId = apiModel.id.toLowerCase();
+			// Determine input types based on mode and capabilities
+			// Note: ProviderModelConfig.input only supports "text" | "image"
+			const inputTypes: ("text" | "image")[] = ["text"];
+			if (apiModel.supports_vision) inputTypes.push("image");
+
+			// Try to match with hardcoded metadata
 			const matchedHardcoded = HARDCODED_MODELS.find(
-				(hc) => hc.id.toLowerCase() === apiId
+				(hc) => hc.id.toLowerCase() === apiModel.id.toLowerCase()
 			);
 
-			const contextWindow = apiModel.max_model_len ?? apiModel.contextWindow ?? 0;
+			// Use hardcoded values for contextWindow and maxTokens if available,
+			// otherwise use defaults based on mode
+			const contextWindow = matchedHardcoded?.contextWindow ?? 128000;
+			const maxTokens = matchedHardcoded?.maxTokens ?? 8192;
 
-			// Start with hardcoded metadata if available, otherwise use API values
-			const config: ProviderModelConfig = matchedHardcoded
-				? {
-						...matchedHardcoded,
-						contextWindow,
-						maxTokens: matchedHardcoded.maxTokens,
-					}
-				: {
-						id: apiModel.id,
-						name: apiModel.id,
-						reasoning: false,
-						input: ["text"],
-						cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
-						contextWindow,
-						maxTokens: 8192,
-					};
+			const config: ProviderModelConfig = {
+				id: apiModel.id,
+				name: apiModel.id,
+				reasoning: apiModel.supports_reasoning,
+				input: inputTypes as any,
+				cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+				contextWindow,
+				maxTokens,
+			};
 
 			return config;
 		});
