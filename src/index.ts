@@ -110,7 +110,15 @@ async function hasCirthanApiKey(ctx: ExtensionContext): Promise<boolean> {
 
 /**
  * Verify models are enabled by fetching /v1/models.
- * Returns hardcoded configs filtered to only include enabled models.
+ *
+ * API is the source of truth for WHAT models exist.
+ * HARDCODED_MODELS provide enriched metadata (reasoning, cost, input types, etc.)
+ * that the API may not return.
+ *
+ * For each model in the API response:
+ * - Merge with hardcoded entry to get full metadata
+ * - Use API's max_model_len/contextWindow for limits
+ * - Lean on hardcoded for other fields
  */
 async function fetchAndFilterModels(apiKey?: string): Promise<ProviderModelConfig[]> {
 	const controller = new AbortController();
@@ -131,7 +139,7 @@ async function fetchAndFilterModels(apiKey?: string): Promise<ProviderModelConfi
 
 		const data = (await response.json()) as OpenAIModelsResponse;
 
-		// Build map of model ID to context window from API
+		// Build map of model ID from API responses (API is source of truth)
 		const apiModelContexts = new Map<string, number>();
 		for (const model of data.data ?? []) {
 			apiModelContexts.set(
@@ -142,30 +150,48 @@ async function fetchAndFilterModels(apiKey?: string): Promise<ProviderModelConfi
 
 		console.log(`[Cirthan Provider] API returned ${apiModelContexts.size} enabled models`);
 
-		// Filter: only include models that are enabled in the API
-		// Always include default model regardless of API response
-		// Use case-insensitive comparison since API may return different casing
-		const filtered = HARDCODED_MODELS.filter((model) => {
-			if (model.id === CIRTHAN_DEFAULT_MODEL_ID) return true;
-			return apiModelContexts.has(model.id.toLowerCase());
-		}).map((model) => {
-			// Override contextWindow with API's max_model_len if available
-			const apiContext = apiModelContexts.get(model.id.toLowerCase());
-			if (apiContext && apiContext > 0) {
-				return { ...model, contextWindow: apiContext };
-			}
-			return model;
+		// Merge API models with hardcoded metadata
+		// For each API model, try to find matching config in HARDCODED_MODELS
+		const models = data.data ?? [];
+
+		// Try to match each API model by ID (case-insensitive)
+		const registered = models.map((apiModel) => {
+			const apiId = apiModel.id.toLowerCase();
+			const matchedHardcoded = HARDCODED_MODELS.find(
+				(hc) => hc.id.toLowerCase() === apiId
+			);
+
+			const contextWindow = apiModel.max_model_len ?? apiModel.contextWindow ?? 0;
+
+			// Start with hardcoded metadata if available, otherwise use API values
+			const config: ProviderModelConfig = matchedHardcoded
+				? {
+						...matchedHardcoded,
+						contextWindow,
+						maxTokens: matchedHardcoded.maxTokens,
+					}
+				: {
+						id: apiModel.id,
+						name: apiModel.id,
+						reasoning: false,
+						input: ["text"],
+						cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+						contextWindow,
+						maxTokens: 8192,
+					};
+
+			return config;
 		});
 
 		// Sort with default model first, then alphabetical
-		filtered.sort((a, b) => {
+		registered.sort((a, b) => {
 			if (a.id === CIRTHAN_DEFAULT_MODEL_ID) return -1;
 			if (b.id === CIRTHAN_DEFAULT_MODEL_ID) return 1;
 			return a.id.localeCompare(b.id);
 		});
 
-		console.log(`[Cirthan Provider] Registered ${filtered.length} model configs for provider 'cirthan'`);
-		return filtered;
+		console.log(`[Cirthan Provider] Registered ${registered.length} model configs for provider 'cirthan'`);
+		return registered;
 	} catch (error) {
 		const message = error instanceof Error ? error.message : String(error);
 		if (message === "AbortError" || message.includes("aborted")) {
@@ -173,8 +199,8 @@ async function fetchAndFilterModels(apiKey?: string): Promise<ProviderModelConfi
 		} else {
 			console.error("[Cirthan Provider] Failed to fetch models:", error);
 		}
-		// On error, return all hardcoded models as fallback
-		console.log("[Cirthan Provider] Using all hardcoded models as fallback");
+		// On error, fall back to hardcoded models for stability
+		console.log("[Cirthan Provider] Fallback to all hardcoded models");
 		return [...HARDCODED_MODELS];
 	} finally {
 		clearTimeout(timeout);
