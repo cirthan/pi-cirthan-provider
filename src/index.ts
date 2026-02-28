@@ -37,6 +37,15 @@ const HARDCODED_MODELS: ProviderModelConfig[] = [
 		contextWindow: 200000,
 		maxTokens: 32768,
 	},
+	{
+		id: "whisper",
+		name: "whisper",
+		reasoning: false,
+		input: ["audio"],
+		cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+		contextWindow: 200000,
+		maxTokens: 32768,
+	},
 ];
 
 // =============================================================================
