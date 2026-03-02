@@ -2,7 +2,10 @@
 
 Cirthan model provider for [pi](https://github.com/mariozechner/pi). Registers the `cirthan` provider using Cirthan's OpenAI-compatible API.
 
-This package fetches models from Cirthan's `/v1/models` endpoint at session start to filter enabled models.
+## Models
+
+- `breglan` (default): snappy, great for everyday use
+- `saelorn`: deliberate, great for complex tasks
 
 ## Setup
 
@@ -33,10 +36,10 @@ Add to `~/.pi/agent/auth.json`:
 
 - List/switch models: `pi /model`
 - Use default model: `pi --model cirthan`
-- Use a specific model: `pi --model cirthan:glm-4.7-flash`
+- Use a specific model: `pi --model cirthan:saelorn`
 
 ## Default model
 
 The default model for this provider is:
 
-- `glm-4.7-flash`
+- `breglan`

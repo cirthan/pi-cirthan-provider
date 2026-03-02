@@ -20,7 +20,7 @@ import {
 const CIRTHAN_API_BASE_URL = (process.env.CIRTHAN_BASE_URL ?? "https://api.cirthan.com/v1").replace(/\/+$/, "");
 
 /** Default model for this provider. */
-const CIRTHAN_DEFAULT_MODEL_ID = "qwen3.5-35b-a3b";
+const CIRTHAN_DEFAULT_MODEL_ID = "breglan";
 
 // =============================================================================
 // Hardcoded model configs
@@ -29,8 +29,17 @@ const CIRTHAN_DEFAULT_MODEL_ID = "qwen3.5-35b-a3b";
 /** Hardcoded model configurations. */
 const HARDCODED_MODELS: ProviderModelConfig[] = [
 	{
-		id: "qwen3.5-35b-a3b",
-		name: "qwen3.5-35b-a3b",
+		id: CIRTHAN_DEFAULT_MODEL_ID,
+		name: CIRTHAN_DEFAULT_MODEL_ID,
+		reasoning: true,
+		input: ["text", "image"],
+		cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+		contextWindow: 200000,
+		maxTokens: 32768,
+	},
+	{
+		id: "saelorn",
+		name: "saelorn",
 		reasoning: true,
 		input: ["text", "image"],
 		cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
