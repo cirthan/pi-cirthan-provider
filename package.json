@@ -26,10 +26,12 @@
     "prepublishOnly": "npm run clean && npm run build"
   },
   "peerDependencies": {
-    "@mariozechner/pi-coding-agent": "*"
+    "@mariozechner/pi-coding-agent": "*",
+    "@mariozechner/pi-ai": "*"
   },
   "devDependencies": {
     "@mariozechner/pi-coding-agent": "^0.51.1",
+    "@mariozechner/pi-ai": "^0.51.1",
     "@types/node": "^22.10.7",
     "eslint": "^9.17.0",
     "globals": "^17.3.0",

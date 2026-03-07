@@ -13,6 +13,15 @@ import {
 	type ProviderModelConfig,
 } from "@mariozechner/pi-coding-agent";
 
+import {
+	type Model,
+	type Api,
+	type Context,
+	type SimpleStreamOptions,
+	type AssistantMessageEventStream,
+	streamSimpleOpenAICompletions,
+} from "@mariozechner/pi-ai";
+
 // =============================================================================
 // Configuration
 // =============================================================================
@@ -21,6 +30,14 @@ const CIRTHAN_API_BASE_URL = (process.env.CIRTHAN_BASE_URL ?? "https://api.cirth
 
 /** Default model for this provider. */
 const CIRTHAN_DEFAULT_MODEL_ID = "breglan";
+
+/** Sampling parameters that prevent premature EOS during reasoning. */
+const CIRTHAN_SAMPLING_PARAMS = {
+	temperature: 0.6,
+	top_p: 0.95,
+	top_k: 20,
+	presence_penalty: 0.0,
+};
 
 // =============================================================================
 // Hardcoded model configs
@@ -83,6 +100,31 @@ function getModels(): ProviderModelConfig[] {
 }
 
 // =============================================================================
+// Custom stream function with sampling params
+// =============================================================================
+
+function cirthanStreamSimple(
+	model: Model<Api>,
+	context: Context,
+	options?: SimpleStreamOptions,
+): AssistantMessageEventStream {
+	const existingOnPayload = options?.onPayload;
+	return streamSimpleOpenAICompletions(model as Model<"openai-completions">, context, {
+		...options,
+		temperature: CIRTHAN_SAMPLING_PARAMS.temperature,
+		onPayload: (payload: unknown) => {
+			if (payload && typeof payload === "object") {
+				const p = payload as Record<string, unknown>;
+				p.top_p = CIRTHAN_SAMPLING_PARAMS.top_p;
+				p.top_k = CIRTHAN_SAMPLING_PARAMS.top_k;
+				p.presence_penalty = CIRTHAN_SAMPLING_PARAMS.presence_penalty;
+			}
+			existingOnPayload?.(payload);
+		},
+	});
+}
+
+// =============================================================================
 // Extension entry point
 // =============================================================================
 
@@ -92,6 +134,7 @@ export default function (pi: ExtensionAPI) {
 		baseUrl: CIRTHAN_API_BASE_URL,
 		apiKey: "CIRTHAN_API_KEY",
 		api: "openai-completions",
+		streamSimple: cirthanStreamSimple,
 		models: HARDCODED_MODELS,
 	});
 
@@ -111,6 +154,7 @@ export default function (pi: ExtensionAPI) {
 			baseUrl: CIRTHAN_API_BASE_URL,
 			apiKey: "CIRTHAN_API_KEY",
 			api: "openai-completions",
+			streamSimple: cirthanStreamSimple,
 			models,
 		});
 	});
