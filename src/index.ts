@@ -109,6 +109,10 @@ function cirthanStreamSimple(
 	options?: SimpleStreamOptions,
 ): AssistantMessageEventStream {
 	const existingOnPayload = options?.onPayload;
+	
+	// Handle saelorn's binary thinking levels via extra_body.chat_template_kwargs
+	const isSaelorn = model.id === "saelorn";
+	
 	return streamSimpleOpenAICompletions(model as Model<"openai-completions">, context, {
 		...options,
 		temperature: CIRTHAN_SAMPLING_PARAMS.temperature,
@@ -118,6 +122,18 @@ function cirthanStreamSimple(
 				p.top_p = CIRTHAN_SAMPLING_PARAMS.top_p;
 				p.top_k = CIRTHAN_SAMPLING_PARAMS.top_k;
 				p.presence_penalty = CIRTHAN_SAMPLING_PARAMS.presence_penalty;
+				
+				// For saelorn, inject extra_body with chat_template_kwargs
+				if (isSaelorn) {
+					const level = options?.reasoning as string | undefined;
+					// undefined means thinking is off, "off" or "minimal" also means off
+					const enableThinking = level !== undefined && level !== "off" && level !== "minimal";
+					(p as Record<string, unknown>).extra_body = {
+						chat_template_kwargs: {
+							enable_thinking: enableThinking,
+						},
+					};
+				}
 			}
 			existingOnPayload?.(payload);
 		},
