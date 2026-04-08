@@ -126,7 +126,7 @@ function cirthanStreamSimple(
 	return streamSimpleOpenAICompletions(model as Model<"openai-completions">, context, {
 		...options,
 		temperature: CIRTHAN_SAMPLING_PARAMS.temperature,
-		onPayload: (payload: unknown) => {
+		onPayload: (payload: unknown, modelArg: Model<Api>) => {
 			if (payload && typeof payload === "object") {
 				const p = payload as Record<string, unknown>;
 				p.top_p = CIRTHAN_SAMPLING_PARAMS.top_p;
@@ -145,7 +145,7 @@ function cirthanStreamSimple(
 					};
 				}
 			}
-			existingOnPayload?.(payload);
+			existingOnPayload?.(payload, modelArg);
 		},
 	});
 }
