@@ -22,6 +22,16 @@ import {
 	streamSimpleOpenAICompletions,
 } from "@mariozechner/pi-ai";
 
+/** Request extensions for models supporting reasoning traces */
+interface ReasoningRequest {
+	extra_body?: {
+		chat_template_kwargs?: {
+			enable_thinking?: boolean;
+		};
+		thinking_token_budget?: number;
+	};
+}
+
 // =============================================================================
 // Configuration
 // =============================================================================
