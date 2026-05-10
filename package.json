@@ -7,6 +7,7 @@
   "types": "./pi-cirthan-provider.ts",
   "files": [
     "pi-cirthan-provider.ts",
+    "models/",
     "README.md"
   ],
   "keywords": [
@@ -28,8 +29,8 @@
     "@mariozechner/pi-ai": "*"
   },
   "devDependencies": {
-    "@mariozechner/pi-coding-agent": "^0.70.0",
-    "@mariozechner/pi-ai": "^0.70.0",
+    "@mariozechner/pi-coding-agent": "^0.72.0",
+    "@mariozechner/pi-ai": "^0.72.0",
     "@types/node": "^22.10.7",
     "typescript": "^5.7.3"
   },

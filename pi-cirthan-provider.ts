@@ -4,7 +4,8 @@
  * Cirthan provider for pi.
  *
  * - Registers a provider using Cirthan's OpenAI-compatible API
- * - Uses hardcoded model configs for full control
+ * - Fetches model configs from /v1/models at session start, cached locally
+ * - Uses per-model inference defaults and thinking budgets from the API
  */
 
 import {
@@ -22,14 +23,46 @@ import {
 	streamSimpleOpenAICompletions,
 } from "@mariozechner/pi-ai";
 
-/** Request extensions for models supporting reasoning traces */
-interface ReasoningRequest {
-	extra_body?: {
-		chat_template_kwargs?: {
-			enable_thinking?: boolean;
-		};
-	};
-	thinking_token_budget?: number;
+import * as os from "node:os";
+import * as fs from "node:fs";
+import * as path from "node:path";
+import { fileURLToPath } from "node:url";
+
+// =============================================================================
+// Types
+// =============================================================================
+
+interface InferenceDefaults {
+	temperature: number;
+	top_p: number;
+	top_k: number;
+	min_p: number;
+	presence_penalty: number;
+	repetition_penalty: number;
+}
+
+interface ThinkingBudgets {
+	minimal: number;
+	low: number;
+	medium: number;
+	high: number;
+	xhigh: number;
+}
+
+interface RawModel {
+	id: string;
+	reasoning: boolean;
+	input_modalities: string[];
+	context_window?: number;
+	max_tokens?: number;
+	inference_defaults?: InferenceDefaults;
+	thinking_budgets?: ThinkingBudgets;
+}
+
+interface ModelsSnapshot {
+	object: "list";
+	version: string;
+	data: RawModel[];
 }
 
 // =============================================================================
@@ -38,52 +71,14 @@ interface ReasoningRequest {
 
 const CIRTHAN_API_BASE_URL = (process.env.CIRTHAN_BASE_URL ?? "https://api.cirthan.com/v1").replace(/\/+$/, "");
 
-/** Default model for this provider. */
-const CIRTHAN_DEFAULT_MODEL_ID = "breglan";
-
-/** Default sampling parameters for precise coding tasks. */
-const CIRTHAN_SAMPLING_PARAMS = {
-	temperature: 0.6,
-	top_p: 0.95,
-	top_k: 20,
-	min_p: 0.0,
-	presence_penalty: 0.0,
-	repetition_penalty: 1.0,
-};
-
-const DEFAULT_THINKING_BUDGETS = {
-	minimal: 512,
-	low: 1024,
-	medium: 2048,
-	high: 4096,
-	xhigh: 8192,
-} as const;
+const CACHE_DIR = path.join(os.homedir(), ".cache", "pi-cirthan-provider");
+const CACHE_FILENAME = "cirthan-models-cache.json";
 
 // =============================================================================
-// Hardcoded model configs
+// Runtime model cache
 // =============================================================================
 
-/** Hardcoded model configurations. */
-const HARDCODED_MODELS: ProviderModelConfig[] = [
-	{
-		id: CIRTHAN_DEFAULT_MODEL_ID,
-		name: CIRTHAN_DEFAULT_MODEL_ID,
-		reasoning: true,
-		input: ["text", "image"],
-		cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
-		contextWindow: 200000,
-		maxTokens: 32768,
-	},
-	{
-		id: "saelorn",
-		name: "saelorn",
-		reasoning: true,
-		input: ["text", "image"],
-		cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
-		contextWindow: 200000,
-		maxTokens: 32768,
-	},
-];
+let activeSnapshot: ModelsSnapshot | null = null;
 
 // =============================================================================
 // Auth helpers
@@ -111,82 +106,144 @@ async function hasCirthanApiKey(ctx: ExtensionContext): Promise<boolean> {
 }
 
 // =============================================================================
-// Model fetching + filtering
+// Snapshot loading + refresh
 // =============================================================================
 
-/** Return hardcoded models. */
-function getModels(): ProviderModelConfig[] {
-	return [...HARDCODED_MODELS];
+function loadShippedSnapshot(): ModelsSnapshot {
+	const __dirname = path.dirname(fileURLToPath(import.meta.url));
+	const shippedPath = path.join(__dirname, "models", "cirthan-models.json");
+	return JSON.parse(fs.readFileSync(shippedPath, "utf-8")) as ModelsSnapshot;
 }
 
-// =============================================================================
-// Custom stream function with sampling params
-// =============================================================================
+async function loadSnapshot(): Promise<ModelsSnapshot> {
+	const cachePath = path.join(CACHE_DIR, CACHE_FILENAME);
 
-function modelSupportsThinking(modelId: string): boolean {
-	return HARDCODED_MODELS.some((model) => model.id === modelId && model.reasoning);
-}
-
-function normalizeThinkingLevel(
-	level: unknown,
-): keyof typeof DEFAULT_THINKING_BUDGETS | "off" {
-	if (
-		level === "minimal" ||
-		level === "low" ||
-		level === "medium" ||
-		level === "high" ||
-		level === "xhigh" ||
-		level === "off"
-	) {
-		return level;
+	// 1. Try cached snapshot first
+	let snapshot: ModelsSnapshot;
+	try {
+		const cached = JSON.parse(fs.readFileSync(cachePath, "utf-8")) as ModelsSnapshot;
+		snapshot = cached;
+	} catch {
+		snapshot = loadShippedSnapshot();
 	}
-	return "medium";
+
+	activeSnapshot = snapshot;
+
+	// 2. Try to refresh from API if we have a key
+	const apiKey = process.env.CIRTHAN_API_KEY;
+	if (!apiKey) {
+		return snapshot;
+	}
+
+	try {
+		const response = await fetch(`${CIRTHAN_API_BASE_URL}/models`, {
+			headers: { Authorization: `Bearer ${apiKey}` },
+		});
+
+		if (!response.ok) {
+			return snapshot;
+		}
+
+		const fresh = (await response.json()) as ModelsSnapshot;
+
+		// Compare versions (ISO timestamps, string compare works)
+		if (fresh.version && fresh.version > snapshot.version) {
+			fs.mkdirSync(CACHE_DIR, { recursive: true });
+			fs.writeFileSync(cachePath, JSON.stringify(fresh, null, 4), "utf-8");
+			activeSnapshot = fresh;
+			console.log(`[Cirthan Provider] Updated models (version: ${fresh.version})`);
+			return fresh;
+		}
+	} catch {
+		// Network error — use cached snapshot silently
+	}
+
+	return snapshot;
 }
 
-function getThinkingTokenBudget(
-	level: keyof typeof DEFAULT_THINKING_BUDGETS,
-	customBudgets?: Partial<Record<keyof typeof DEFAULT_THINKING_BUDGETS, number>>,
-): number {
-	return customBudgets?.[level] ?? DEFAULT_THINKING_BUDGETS[level];
+// =============================================================================
+// Model config building
+// =============================================================================
+
+function getModelsFromSnapshot(snapshot: ModelsSnapshot): ProviderModelConfig[] {
+	return snapshot.data
+		.filter((m) => m.input_modalities.includes("text"))
+		.map((m) => {
+			const config: ProviderModelConfig = {
+				id: m.id,
+				name: m.id,
+				reasoning: m.reasoning ?? false,
+				input: m.input_modalities.filter((mod) => mod === "text" || mod === "image") as ("text" | "image")[],
+				cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+				contextWindow: m.context_window ?? 200_000,
+				maxTokens: m.max_tokens ?? 32_768,
+			};
+
+			// Map thinking budgets to thinkingLevelMap
+			// Pi passes options.reasoning as the ThinkingLevel enum.
+			// We look up model.thinkingLevelMap[options.reasoning] in streamSimple.
+			if (m.reasoning && m.thinking_budgets) {
+				config.thinkingLevelMap = {
+					minimal: String(m.thinking_budgets.minimal),
+					low: String(m.thinking_budgets.low),
+					medium: String(m.thinking_budgets.medium),
+					high: String(m.thinking_budgets.high),
+					xhigh: String(m.thinking_budgets.xhigh),
+				};
+			}
+
+			return config;
+		});
 }
+
+// =============================================================================
+// Custom stream function with per-model params
+// =============================================================================
 
 function cirthanStreamSimple(
 	model: Model<Api>,
 	context: Context,
 	options?: SimpleStreamOptions,
 ): AssistantMessageEventStream {
+	const modelInfo = activeSnapshot?.data.find((m) => m.id === model.id);
+	const defaults = modelInfo?.inference_defaults;
+	const hasReasoning = modelInfo?.reasoning ?? false;
 	const existingOnPayload = options?.onPayload;
 
 	return streamSimpleOpenAICompletions(model as Model<"openai-completions">, context, {
 		...options,
-		temperature: CIRTHAN_SAMPLING_PARAMS.temperature,
+		temperature: defaults?.temperature,
 		onPayload: (payload: unknown, modelArg: Model<Api>) => {
 			if (payload && typeof payload === "object") {
-				const p = payload as Record<string, unknown> & ReasoningRequest;
-				p.top_p = CIRTHAN_SAMPLING_PARAMS.top_p;
-				p.top_k = CIRTHAN_SAMPLING_PARAMS.top_k;
-				p.min_p = CIRTHAN_SAMPLING_PARAMS.min_p;
-				p.presence_penalty = CIRTHAN_SAMPLING_PARAMS.presence_penalty;
-				p.repetition_penalty = CIRTHAN_SAMPLING_PARAMS.repetition_penalty;
+				const p = payload as Record<string, unknown>;
 
-				if (modelSupportsThinking(model.id)) {
-					const thinkingLevel = normalizeThinkingLevel(options?.reasoning);
-					const enableThinking = thinkingLevel !== "off";
+				// Apply per-model inference defaults
+				if (defaults) {
+					p.top_p = defaults.top_p;
+					p.top_k = defaults.top_k;
+					p.min_p = defaults.min_p;
+					p.presence_penalty = defaults.presence_penalty;
+					p.repetition_penalty = defaults.repetition_penalty;
+				}
+
+				// Thinking: pi passes the ThinkingLevel enum in options.reasoning.
+				// model.thinkingLevelMap resolves it to the token budget string.
+				if (
+					hasReasoning &&
+					options?.reasoning &&
+					model.thinkingLevelMap?.[options.reasoning]
+				) {
+					const budgetValue = model.thinkingLevelMap[options.reasoning];
+					const extraBody = p.extra_body ?? {};
+					const chatTemplateKwargs = (extraBody as Record<string, unknown>).chat_template_kwargs ?? {};
 					p.extra_body = {
-						...(p.extra_body ?? {}),
+						...(extraBody as Record<string, unknown>),
 						chat_template_kwargs: {
-							...(p.extra_body?.chat_template_kwargs ?? {}),
-							enable_thinking: enableThinking,
+							...(chatTemplateKwargs as Record<string, unknown>),
+							enable_thinking: true,
 						},
 					};
-					if (thinkingLevel !== "off") {
-						p.thinking_token_budget = getThinkingTokenBudget(
-							thinkingLevel,
-							options?.thinkingBudgets,
-						);
-					} else {
-						delete p.thinking_token_budget;
-					}
+					p.thinking_token_budget = Number(budgetValue);
 				}
 			}
 			existingOnPayload?.(payload, modelArg);
@@ -199,18 +256,17 @@ function cirthanStreamSimple(
 // =============================================================================
 
 export default function (pi: ExtensionAPI) {
-	// Initial registration must happen synchronously (see synthetic provider).
+	// Initial registration must happen synchronously.
 	pi.registerProvider("cirthan", {
 		baseUrl: CIRTHAN_API_BASE_URL,
 		apiKey: "CIRTHAN_API_KEY",
 		api: "openai-completions",
 		streamSimple: cirthanStreamSimple,
-		models: HARDCODED_MODELS,
+		models: [],
 	});
 
 	pi.on("session_start", async (_event, ctx) => {
 		const hasKey = await hasCirthanApiKey(ctx);
-		const apiKey = await getCirthanApiKey(ctx);
 
 		if (!hasKey) {
 			console.log("[Cirthan Provider] API key not configured.");
@@ -219,7 +275,9 @@ export default function (pi: ExtensionAPI) {
 			console.log("  2. Add to ~/.pi/agent/auth.json (provider: \"cirthan\")");
 		}
 
-		const models = getModels();
+		const snapshot = await loadSnapshot();
+		const models = getModelsFromSnapshot(snapshot);
+
 		ctx.modelRegistry.registerProvider("cirthan", {
 			baseUrl: CIRTHAN_API_BASE_URL,
 			apiKey: "CIRTHAN_API_KEY",
@@ -228,5 +286,4 @@ export default function (pi: ExtensionAPI) {
 			models,
 		});
 	});
-
 }
