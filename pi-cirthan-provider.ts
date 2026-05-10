@@ -295,13 +295,18 @@ function cirthanStreamSimple(
 // =============================================================================
 
 export default function (pi: ExtensionAPI) {
+	// Build models from the shipped snapshot so they're available at sync registration time.
+	const shippedSnapshot = loadShippedSnapshot();
+	activeSnapshot = shippedSnapshot;
+	const models = getModelsFromSnapshot(shippedSnapshot);
+
 	// Initial registration must happen synchronously.
 	pi.registerProvider("cirthan", {
 		baseUrl: CIRTHAN_API_BASE_URL,
 		apiKey: "CIRTHAN_API_KEY",
 		api: "openai-completions",
 		streamSimple: cirthanStreamSimple,
-		models: [],
+		models,
 	});
 
 	pi.on("session_start", async (_event, ctx) => {
@@ -314,15 +319,16 @@ export default function (pi: ExtensionAPI) {
 			console.log("  2. Add to ~/.pi/agent/auth.json (provider: \"cirthan\")");
 		}
 
+		// Try to refresh from API (uses cached snapshot if no key or network error)
 		const snapshot = await loadSnapshot();
-		const models = getModelsFromSnapshot(snapshot);
+		const refreshedModels = getModelsFromSnapshot(snapshot);
 
 		ctx.modelRegistry.registerProvider("cirthan", {
 			baseUrl: CIRTHAN_API_BASE_URL,
 			apiKey: "CIRTHAN_API_KEY",
 			api: "openai-completions",
 			streamSimple: cirthanStreamSimple,
-			models,
+			models: refreshedModels,
 		});
 	});
 }
