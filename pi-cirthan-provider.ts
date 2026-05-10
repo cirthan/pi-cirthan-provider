@@ -26,7 +26,6 @@ import {
 import * as os from "node:os";
 import * as fs from "node:fs";
 import * as path from "node:path";
-import { fileURLToPath } from "node:url";
 
 // =============================================================================
 // Types
@@ -64,6 +63,48 @@ interface ModelsSnapshot {
 	version: string;
 	data: RawModel[];
 }
+
+const SHIPPED_SNAPSHOT = JSON.stringify({
+    "object": "list",
+    "version": "2026-05-10T00:35:24Z",
+    "data": [
+        {
+            "id": "saelorn",
+            "object": "model",
+            "created": 0,
+            "owned_by": "cirthan",
+            "description": "deliberate, great for complex tasks",
+            "reasoning": true,
+            "input_modalities": ["text", "image"],
+            "context_window": 262144,
+            "max_tokens": 32768,
+            "inference_defaults": { "min_p": 0, "top_k": 20, "top_p": 0.95, "temperature": 0.6, "presence_penalty": 0, "repetition_penalty": 1 },
+            "thinking_budgets": { "low": 1024, "high": 4096, "xhigh": 8192, "medium": 2048, "minimal": 512 }
+        },
+        {
+            "id": "breglan",
+            "object": "model",
+            "created": 0,
+            "owned_by": "cirthan",
+            "description": "snappy, great for everyday use",
+            "reasoning": true,
+            "input_modalities": ["text"],
+            "context_window": 131072,
+            "max_tokens": 8192,
+            "inference_defaults": { "min_p": 0, "top_k": 20, "top_p": 0.95, "temperature": 0.7, "presence_penalty": 0, "repetition_penalty": 1 },
+            "thinking_budgets": { "low": 1024, "high": 4096, "xhigh": 8192, "medium": 2048, "minimal": 512 }
+        },
+        {
+            "id": "whisper",
+            "object": "model",
+            "created": 0,
+            "owned_by": "cirthan",
+            "description": "Whisper Large V3 Turbo",
+            "reasoning": false,
+            "input_modalities": ["audio"]
+        }
+    ]
+});
 
 // =============================================================================
 // Configuration
@@ -110,9 +151,7 @@ async function hasCirthanApiKey(ctx: ExtensionContext): Promise<boolean> {
 // =============================================================================
 
 function loadShippedSnapshot(): ModelsSnapshot {
-	const __dirname = path.dirname(fileURLToPath(import.meta.url));
-	const shippedPath = path.join(__dirname, "models", "cirthan-models.json");
-	return JSON.parse(fs.readFileSync(shippedPath, "utf-8")) as ModelsSnapshot;
+	return JSON.parse(SHIPPED_SNAPSHOT) as ModelsSnapshot;
 }
 
 async function loadSnapshot(): Promise<ModelsSnapshot> {

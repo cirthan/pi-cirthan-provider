@@ -7,7 +7,6 @@
   "types": "./pi-cirthan-provider.ts",
   "files": [
     "pi-cirthan-provider.ts",
-    "models/",
     "README.md"
   ],
   "keywords": [
