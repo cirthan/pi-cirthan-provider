@@ -2,8 +2,8 @@
 
 ## Build and Check
 
-- Build with `npm run build`
-- Clean with `npm run clean`
+- Check with `npm run typecheck`
+- There is no build step; pi loads `pi-cirthan-provider.ts` directly
 
 ## Release Process
 
