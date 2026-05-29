@@ -1,6 +1,6 @@
 # pi-cirthan-provider
 
-Cirthan model provider for [pi](https://github.com/mariozechner/pi). Registers the `cirthan` provider using Cirthan's OpenAI-compatible API.
+Cirthan model provider for [pi](https://github.com/earendil-works/pi). Registers the `cirthan` provider using Cirthan's OpenAI-compatible API.
 
 ## Models
 

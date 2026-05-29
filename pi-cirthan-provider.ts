@@ -12,7 +12,7 @@ import {
 	type ExtensionAPI,
 	type ExtensionContext,
 	type ProviderModelConfig,
-} from "@mariozechner/pi-coding-agent";
+} from "@earendil-works/pi-coding-agent";
 
 import {
 	type Model,
@@ -21,7 +21,7 @@ import {
 	type SimpleStreamOptions,
 	type AssistantMessageEventStream,
 	streamSimpleOpenAICompletions,
-} from "@mariozechner/pi-ai";
+} from "@earendil-works/pi-ai";
 
 import * as os from "node:os";
 import * as fs from "node:fs";
@@ -303,7 +303,7 @@ export default function (pi: ExtensionAPI) {
 	// Initial registration must happen synchronously.
 	pi.registerProvider("cirthan", {
 		baseUrl: CIRTHAN_API_BASE_URL,
-		apiKey: "CIRTHAN_API_KEY",
+		apiKey: "$CIRTHAN_API_KEY",
 		api: "openai-completions",
 		streamSimple: cirthanStreamSimple,
 		models,
@@ -325,7 +325,7 @@ export default function (pi: ExtensionAPI) {
 
 		ctx.modelRegistry.registerProvider("cirthan", {
 			baseUrl: CIRTHAN_API_BASE_URL,
-			apiKey: "CIRTHAN_API_KEY",
+			apiKey: "$CIRTHAN_API_KEY",
 			api: "openai-completions",
 			streamSimple: cirthanStreamSimple,
 			models: refreshedModels,
