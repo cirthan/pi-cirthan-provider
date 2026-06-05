@@ -198,6 +198,10 @@ function getModelsFromSnapshot(snapshot: ModelsSnapshot): ProviderModelConfig[] 
 // Custom stream function with per-model params
 // =============================================================================
 
+function asRecord(value: unknown): Record<string, unknown> {
+	return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {};
+}
+
 function cirthanStreamSimple(
 	model: Model<Api>,
 	context: Context,
@@ -224,24 +228,30 @@ function cirthanStreamSimple(
 					p.repetition_penalty = defaults.repetition_penalty;
 				}
 
-				// Thinking: pi passes the ThinkingLevel enum in options.reasoning.
-				// model.thinkingLevelMap resolves it to the token budget string.
-				if (
-					hasReasoning &&
-					options?.reasoning &&
-					model.thinkingLevelMap?.[options.reasoning]
-				) {
-					const budgetValue = model.thinkingLevelMap[options.reasoning];
-					const extraBody = p.extra_body ?? {};
-					const chatTemplateKwargs = (extraBody as Record<string, unknown>).chat_template_kwargs ?? {};
+				if (hasReasoning) {
+					const requestedReasoning = options?.reasoning as string | undefined;
+					const budgetValue = options?.reasoning && requestedReasoning !== "off"
+						? model.thinkingLevelMap?.[options.reasoning]
+						: undefined;
+					const enableThinking = requestedReasoning !== undefined && requestedReasoning !== "off" && budgetValue !== null;
+					const extraBody = asRecord(p.extra_body);
+					const chatTemplateKwargs = asRecord(extraBody.chat_template_kwargs);
+
 					p.extra_body = {
-						...(extraBody as Record<string, unknown>),
+						...extraBody,
 						chat_template_kwargs: {
-							...(chatTemplateKwargs as Record<string, unknown>),
-							enable_thinking: true,
+							...chatTemplateKwargs,
+							enable_thinking: enableThinking,
 						},
 					};
-					p.thinking_token_budget = Number(budgetValue);
+
+					if (typeof budgetValue === "string") {
+						p.thinking_token_budget = Number(budgetValue);
+					} else if (!enableThinking) {
+						p.thinking_token_budget = 0;
+					} else {
+						delete p.thinking_token_budget;
+					}
 				}
 			}
 			existingOnPayload?.(payload, modelArg);
