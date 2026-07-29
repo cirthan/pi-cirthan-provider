@@ -2,16 +2,23 @@ import {
 	type ExtensionAPI,
 	type ProviderModelConfig,
 } from "@earendil-works/pi-coding-agent";
+import * as piAICompat from "@earendil-works/pi-ai";
 import {
 	type Api,
 	type AssistantMessageEventStream,
 	type Context,
 	type Model,
+	type ProviderStreams,
 	type RefreshModelsContext,
 	type SimpleStreamOptions,
 	clampThinkingLevel,
 } from "@earendil-works/pi-ai";
-import { streamSimple as streamSimpleOpenAICompletions } from "@earendil-works/pi-ai/api/openai-completions";
+
+// Pi exposes its compatibility entrypoint to extensions through the package root.
+// The npm package's root types omit these compatibility-only API factories.
+const { streamSimple: streamSimpleOpenAICompletions } = (
+	piAICompat as unknown as { openAICompletionsApi: () => ProviderStreams }
+).openAICompletionsApi();
 
 const CIRTHAN_API_BASE_URL = (process.env.CIRTHAN_BASE_URL ?? "https://api.cirthan.com/v1").replace(/\/+$/, "");
 const REASONING_MODELS = [
@@ -189,7 +196,7 @@ function cirthanStreamSimple(
 	context: Context,
 	options?: SimpleStreamOptions,
 ): AssistantMessageEventStream {
-	return streamSimpleOpenAICompletions(model as Model<"openai-completions">, context, {
+	return streamSimpleOpenAICompletions(model, context, {
 		...options,
 		onPayload: (payload: unknown, modelArg: Model<Api>) => {
 			if (getReasoningModel(modelArg.id) && isRecord(payload)) {
