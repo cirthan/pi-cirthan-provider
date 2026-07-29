@@ -24,12 +24,12 @@
     "prepublishOnly": "npm run typecheck"
   },
   "peerDependencies": {
-    "@earendil-works/pi-coding-agent": ">=0.77.0",
-    "@earendil-works/pi-ai": ">=0.77.0"
+    "@earendil-works/pi-coding-agent": ">=0.82.0",
+    "@earendil-works/pi-ai": ">=0.82.0"
   },
   "devDependencies": {
-    "@earendil-works/pi-coding-agent": "^0.77.0",
-    "@earendil-works/pi-ai": "^0.77.0",
+    "@earendil-works/pi-coding-agent": "^0.82.0",
+    "@earendil-works/pi-ai": "^0.82.0",
     "@types/node": "^22.10.7",
     "typescript": "^5.7.3"
   },

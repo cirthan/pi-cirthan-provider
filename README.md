@@ -4,8 +4,12 @@ Cirthan model provider for [pi](https://github.com/earendil-works/pi). Registers
 
 ## Models
 
-- `breglan` (default): snappy, great for everyday use
-- `saelorn`: deliberate, great for complex tasks
+Models are discovered from Cirthan's `/v1/models` endpoint and cached by pi. The bundled fallback includes:
+
+- `qwen3.6-35b-a3b`
+- `qwen3.6-27b`
+
+Both Qwen 3.6 models support `off`, `low`, `medium`, `high`, and `xhigh` reasoning efforts.
 
 ## Setup
 
@@ -35,11 +39,5 @@ Add to `~/.pi/agent/auth.json`:
 ## Usage
 
 - List/switch models: `pi /model`
-- Use default model: `pi --model cirthan`
-- Use a specific model: `pi --model cirthan:saelorn`
-
-## Default model
-
-The default model for this provider is:
-
-- `breglan`
+- Use the recommended model: `pi --model cirthan/qwen3.6-35b-a3b`
+- Use the other Qwen model: `pi --model cirthan/qwen3.6-27b`
