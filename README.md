@@ -8,8 +8,12 @@ Models are discovered from Cirthan's `/v1/models` endpoint and cached by pi. The
 
 - `qwen3.6-35b-a3b`
 - `qwen3.6-27b`
+- `deepseek-v4-flash-0731`
 
 Both Qwen 3.6 models support `off`, `low`, `medium`, `high`, and `xhigh` reasoning efforts.
+DeepSeek V4 Flash 0731 supports `off`, `low`, and `high`. `medium`, `xhigh`, and `max` are
+disabled because the served context window is limited to 180,000 tokens and the native
+model exposes only low/high/max effort levels.
 
 ## Setup
 

@@ -21,16 +21,53 @@ const { streamSimple: streamSimpleOpenAICompletions } = (
 ).openAICompletionsApi();
 
 const CIRTHAN_API_BASE_URL = (process.env.CIRTHAN_BASE_URL ?? "https://api.cirthan.com/v1").replace(/\/+$/, "");
+const DEEPSEEK_MODEL_ID = "deepseek-v4-flash-0731";
+// Flip this when the served deployment can safely support DeepSeek max thinking.
+const DEEPSEEK_MAX_THINKING_ENABLED = false;
+const QWEN_THINKING_LEVEL_MAP = {
+	off: "none",
+	minimal: null,
+	low: "low",
+	medium: "medium",
+	high: "high",
+	xhigh: "xhigh",
+	max: null,
+} satisfies NonNullable<ProviderModelConfig["thinkingLevelMap"]>;
+const DEEPSEEK_THINKING_LEVEL_MAP = {
+	off: "none",
+	minimal: null,
+	low: "low",
+	medium: null,
+	high: "high",
+	xhigh: null,
+	max: DEEPSEEK_MAX_THINKING_ENABLED ? "max" : null,
+} satisfies NonNullable<ProviderModelConfig["thinkingLevelMap"]>;
+type ReasoningModelDefinition = {
+	id: string;
+	cost?: ProviderModelConfig["cost"];
+	contextWindow?: number;
+	input?: ProviderModelConfig["input"];
+	thinkingLevelMap: NonNullable<ProviderModelConfig["thinkingLevelMap"]>;
+};
 const REASONING_MODELS = [
 	{
 		id: "qwen3.6-35b-a3b",
 		cost: { input: 0.10, output: 0.90, cacheRead: 0, cacheWrite: 0 },
+		thinkingLevelMap: QWEN_THINKING_LEVEL_MAP,
 	},
 	{
 		id: "qwen3.6-27b",
 		cost: { input: 0.25, output: 1.90, cacheRead: 0, cacheWrite: 0 },
+		thinkingLevelMap: QWEN_THINKING_LEVEL_MAP,
 	},
-] satisfies ReadonlyArray<{ id: string; cost: ProviderModelConfig["cost"] }>;
+	{
+		id: DEEPSEEK_MODEL_ID,
+		cost: { input: 0.14, output: 0.28, cacheRead: 0, cacheWrite: 0 },
+		contextWindow: 180_000,
+		input: ["text"],
+		thinkingLevelMap: DEEPSEEK_THINKING_LEVEL_MAP,
+	},
+] satisfies ReadonlyArray<ReasoningModelDefinition>;
 const DEPRECATED_MODEL_IDS = new Set(["saelorn", "breglan"]);
 
 const HIDDEN_THINKING_LEVELS = {
@@ -44,15 +81,6 @@ const HIDDEN_THINKING_LEVELS = {
 
 const REASONING_MODEL_CONFIG = {
 	reasoning: true,
-	thinkingLevelMap: {
-		off: "none",
-		minimal: null,
-		low: "low",
-		medium: "medium",
-		high: "high",
-		xhigh: "xhigh",
-		max: null,
-	},
 	compat: {
 		thinkingFormat: "chat-template",
 		supportsReasoningEffort: true,
@@ -77,7 +105,15 @@ function getReasoningModel(id: string) {
 
 function configureModel(model: ProviderModelConfig): ProviderModelConfig {
 	const reasoningModel = getReasoningModel(model.id);
-	if (reasoningModel) return { ...model, ...REASONING_MODEL_CONFIG, cost: reasoningModel.cost };
+	if (reasoningModel) {
+		return {
+			...model,
+			...REASONING_MODEL_CONFIG,
+			thinkingLevelMap: reasoningModel.thinkingLevelMap,
+			...(reasoningModel.cost ? { cost: reasoningModel.cost } : {}),
+			...(reasoningModel.contextWindow ? { contextWindow: reasoningModel.contextWindow } : {}),
+		};
+	}
 	return model.reasoning ? { ...model, thinkingLevelMap: HIDDEN_THINKING_LEVELS } : model;
 }
 
@@ -150,12 +186,20 @@ function restoreModels(models: readonly Model<Api>[]): ProviderModelConfig[] {
 		})));
 }
 
-const BUNDLED_MODELS = REASONING_MODELS.map(({ id, cost }) => configureModel({
+function mergeModels(primary: readonly ProviderModelConfig[], fallback: readonly ProviderModelConfig[]): ProviderModelConfig[] {
+	const models = new Map(primary.map((model) => [model.id, model]));
+	for (const model of fallback) {
+		if (!models.has(model.id)) models.set(model.id, model);
+	}
+	return orderModels([...models.values()]);
+}
+
+const BUNDLED_MODELS = REASONING_MODELS.map(({ id, cost, input }) => configureModel({
 	id,
 	name: id,
 	reasoning: true,
-	input: ["text", "image"],
-	cost,
+	input: input ?? ["text", "image"],
+	cost: cost ?? { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
 	contextWindow: 262_144,
 	maxTokens: 32_768,
 }));
@@ -165,7 +209,7 @@ async function refreshModels(
 ): Promise<ProviderModelConfig[]> {
 	const stored = await store.read();
 	const storedModels = stored ? restoreModels(stored.models) : [];
-	const fallback = storedModels.length > 0 ? storedModels : BUNDLED_MODELS;
+	const fallback = mergeModels(storedModels, BUNDLED_MODELS);
 	if (!allowNetwork || signal?.aborted) return fallback;
 
 	const apiKey = credential?.type === "api_key" ? credential.key : undefined;
